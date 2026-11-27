@@ -1,0 +1,306 @@
+{
+  "name": "Real Estate - Lead Triage",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "b66f31d4-482f-4f3d-a06a-1b62f03f5345",
+      "name": "Run: Triage Today's Leads",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        96
+      ]
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1e0u8eJhzjf7BnJmVhBkz2mWpUy4hSVer6tpU373mE-Q",
+          "mode": "list",
+          "cachedResultName": "Real Estate Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1e0u8eJhzjf7BnJmVhBkz2mWpUy4hSVer6tpU373mE-Q/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": 83430394,
+          "mode": "list",
+          "cachedResultName": "inventory table",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1e0u8eJhzjf7BnJmVhBkz2mWpUy4hSVer6tpU373mE-Q/edit#gid=83430394"
+        },
+        "options": {}
+      },
+      "id": "cda2d88b-6dbe-4bd3-bfcb-8aa0dd77115c",
+      "name": "Read Inventory Tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        224,
+        96
+      ],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1e0u8eJhzjf7BnJmVhBkz2mWpUy4hSVer6tpU373mE-Q",
+          "mode": "list",
+          "cachedResultName": "Real Estate Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1e0u8eJhzjf7BnJmVhBkz2mWpUy4hSVer6tpU373mE-Q/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Real-Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1e0u8eJhzjf7BnJmVhBkz2mWpUy4hSVer6tpU373mE-Q/edit#gid=0"
+        },
+        "options": {}
+      },
+      "id": "8580bac2-6db0-4362-95b9-c8c68e1f9b4e",
+      "name": "Read Leads Tab",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        448,
+        96
+      ],
+      "executeOnce": true,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst items = $input.all();\n\nconst inventory = [\n  { type: \"apartment\", min: 150000, max: 300000 },\n  { type: \"house\", min: 250000, max: 500000 },\n  { type: \"luxury\", min: 500000, max: 1000000 }\n];\n\nconst getField = (obj, ...names) => {\n  for (const name of names) {\n    const key = Object.keys(obj).find(\n      k => k.toLowerCase().trim() === name.toLowerCase()\n    );\n\n    if (key !== undefined && obj[key] !== null &&\n        String(obj[key]).trim() !== \"\") {\n      return obj[key];\n    }\n  }\n  return \"\";\n};\n\nconst getBudget = value => {\n  if (typeof value === \"number\") return value;\n\n  const cleaned = String(value ?? \"\")\n    .replace(/[$,\\s]/g, \"\");\n\n  if (!cleaned || !/^\\d+(\\.\\d+)?$/.test(cleaned)) {\n    return null;\n  }\n\n  return Number(cleaned);\n};\n\nconst leads = items\n  .map((item, index) => ({\n    originalIndex: index,\n    data: item.json\n  }))\n  .filter(({ data }) =>\n    String(getField(data, \"Status\")).trim().toLowerCase() === \"new\"\n  )\n  .map(({ data, originalIndex }) => {\n    const name = getField(data, \"Name\");\n    const email = getField(data, \"Email\");\n    const phone = getField(data, \"Phone\");\n    const budgetRaw = getField(data, \"Budget\");\n    const sourceRaw = getField(data, \"Source\");\n    const inquiry = getField(data, \"Inquiry\");\n\n    const budget = getBudget(budgetRaw);\n    const source = String(sourceRaw).trim().toLowerCase();\n\n    let priority = \"Low\";\n    let reason = \"\";\n    let budgetMatches = false;\n\n    const missing = [];\n\n    if (!name) missing.push(\"Name\");\n    if (!email) missing.push(\"Email\");\n    if (!phone) missing.push(\"Phone\");\n    if (!budgetRaw || budget === null) missing.push(\"valid Budget\");\n    if (!sourceRaw) missing.push(\"Source\");\n    if (!inquiry) missing.push(\"Inquiry\");\n\n    const text = String(inquiry).toLowerCase();\n\n    let propertyType = null;\n\n    if (/\\bluxury\\b/.test(text)) {\n      propertyType = \"luxury\";\n    } else if (/\\b(apartment|apartments|condo|condos|flat|flats)\\b/.test(text)) {\n      propertyType = \"apartment\";\n    } else if (/\\b(house|houses|home|homes)\\b/.test(text)) {\n      propertyType = \"house\";\n    }\n\n    if (missing.length > 0) {\n      reason = `Incomplete information: missing ${missing.join(\", \")}.`;\n    } else {\n      const suitableInventory = propertyType\n        ? inventory.filter(p => p.type === propertyType)\n        : inventory;\n\n      budgetMatches = suitableInventory.some(\n        p => budget >= p.min && budget <= p.max\n      );\n\n      if (!budgetMatches) {\n        reason = propertyType\n          ? `Budget does not match the available ${propertyType} inventory range.`\n          : \"Budget does not match any defined inventory range.\";\n      } else if (\n        source === \"referral\" ||\n        source === \"hot listing\"\n      ) {\n        priority = \"High\";\n        reason = `Budget matches available inventory and lead came through ${source}.`;\n      } else if (\n        source === \"cold lead\" ||\n        source === \"advertisement\"\n      ) {\n        priority = \"Medium\";\n        reason = `Budget matches available inventory, but the source is ${source}.`;\n      } else {\n        reason = `Source \"${sourceRaw}\" does not meet the defined High or Medium Priority rules.`;\n      }\n    }\n\n    let followUp = \"\";\n\n    if (priority === \"High\") {\n      const interest = inquiry\n        ? `your interest in ${String(inquiry).trim().replace(/[.!?]+$/, \"\")}`\n        : \"your property inquiry\";\n\n      followUp =\n        `Hi ${name}, thank you for ${interest}. Your budget appears to match our available inventory.\\n` +\n        \"Would you be available for a quick call to discuss suitable properties?\";\n    }\n\n    return {\n      originalIndex,\n      name,\n      email,\n      phone,\n      budget: budgetRaw,\n      source: sourceRaw,\n      inquiry,\n      status: \"New\",\n      priority,\n      reason,\n      followUp\n    };\n  });\n\nconst priorityRank = {\n  High: 1,\n  Medium: 2,\n  Low: 3\n};\n\nleads.sort((a, b) =>\n  priorityRank[a.priority] - priorityRank[b.priority] ||\n  a.originalIndex - b.originalIndex\n);\n\nconst high = leads.filter(l => l.priority === \"High\");\nconst medium = leads.filter(l => l.priority === \"Medium\");\nconst low = leads.filter(l => l.priority === \"Low\");\n\nreturn [\n  {\n    json: {\n      title: \"Lead Triage Results\",\n      new_leads_processed: leads.length,\n      high_priority_count: high.length,\n      medium_priority_count: medium.length,\n      low_priority_count: low.length,\n      leads: leads.map(({ originalIndex, ...lead }) => lead),\n      high_priority_follow_ups: high.map(l => ({\n        name: l.name,\n        phone: l.phone,\n        message: l.followUp\n      })),\n      data_quality_issues: low\n        .filter(l => l.reason.startsWith(\"Incomplete information\"))\n        .map(l => ({\n          name: l.name || \"Unknown\",\n          reason: l.reason\n        })),\n      connector_issues: [],\n      message: leads.length === 0\n        ? \"No new leads were found in the input data.\"\n        : \"Lead triage completed.\"\n    }\n  }\n];"
+      },
+      "id": "ddf3b78b-3896-40d4-9f07-77fdb804ee13",
+      "name": "Score and Sort Leads",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        896,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "follow-up-message",
+              "name": "followUpMessage",
+              "value": "={{ $json.priority === \"High\" ? \"Hi \" + $json.name.split(\" \")[0] + \", I am following up on your enquiry about the \" + $json.propertyInterest + \" in \" + $json.preferredLocation + \". Your budget fits a unit we have available right now.\" + \"\\n\" + \"Do you have 10 minutes for a quick call today so I can set up a viewing?\" : \"\" }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "247ff94e-2356-4b48-95bd-a039f9dbf920",
+      "name": "Draft Follow-Up for High Leads",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        1120,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "\nconst data = $input.first().json;\n\nconst leads = Array.isArray(data.leads)\n  ? data.leads\n  : [];\n\nconst highLeads = leads.filter(lead =>\n  String(lead.priority ?? \"\").trim().toLowerCase() === \"high\"\n);\n\nconst high_priority_follow_ups = highLeads.map(lead => {\n  const name = String(lead.name ?? \"Customer\").trim();\n\n  const inquiry = String(lead.inquiry ?? \"\").trim();\n\n  let message = String(\n    lead.followUpMessage ?? lead.followUp ?? \"\"\n  ).trim();\n\n  if (!message) {\n    message =\n      `Hi ${name}, thank you for your inquiry` +\n      (inquiry ? ` about ${inquiry}` : \" about our properties\") +\n      \". Your budget appears to match our available inventory.\\n\\n\" +\n      \"Would you be available for a quick call to discuss suitable properties?\";\n  }\n\n  return {\n    name: name,\n    email: String(lead.email ?? \"\").trim(),\n    phone: String(lead.phone ?? \"\").trim(),\n    budget: lead.budgetLabel ?? lead.budget ?? \"\",\n    inquiry: inquiry,\n    priority: \"High\",\n    message: message\n  };\n}).filter(customer =>\n  customer.email !== \"\" &&\n  customer.message !== \"\"\n);\n\nreturn high_priority_follow_ups.map(customer => ({\n  json: customer\n}));"
+      },
+      "id": "7cd82e91-9a39-4b42-ad7c-b5e5011f7e8d",
+      "name": "Build Triage Report",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1344,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ String($json.Status ?? \"\").trim() }}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              },
+              "rightValue": "New",
+              "id": "33e763d8-6242-409d-aade-f8b5cc5e6135"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "8f58b5d5-48d2-4250-a2f3-3aa891e44c01",
+      "name": "Keep Only Status = New",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.3,
+      "position": [
+        672,
+        0
+      ]
+    },
+    {
+      "parameters": {
+        "sendTo": "={{ $json.email }}",
+        "subject": "Follow-up on Your Property Inquiry",
+        "emailType": "text",
+        "message": "=\n={{\n\"Dear \" + $json.name + \",\\n\\n\" +\n\"Thank you for your property inquiry.\\n\\n\" +\n\"Your inquiry: \" + $json.inquiry + \"\\n\" +\n\"Your budget: \" + $json.budget + \"\\n\\n\" +\n$json.message + \"\\n\\n\" +\n\"Best regards,\\nReal Estate Team\"\n}}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.2,
+      "position": [
+        1568,
+        0
+      ],
+      "id": "abf2e014-5647-409b-a5e2-60c5e54c5c05",
+      "name": "Send a message",
+      "webhookId": "7c4118e5-cefc-401e-a2f7-c770f9ebc0dd"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "error-message",
+              "name": "triageError",
+              "value": "=Could not read the Leads tab from Google Sheets. No triage was run and no results were invented. Details: {{ $json.error?.message ?? \"unknown error\" }}",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": true,
+        "options": {}
+      },
+      "id": "a26f1217-4605-4d1b-b38f-76a0bc63575f",
+      "name": "Report Sheet Read Error",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        672,
+        192
+      ],
+      "disabled": true
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Run: Triage Today's Leads": {
+      "main": [
+        [
+          {
+            "node": "Read Inventory Tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Inventory Tab": {
+      "main": [
+        [
+          {
+            "node": "Read Leads Tab",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read Leads Tab": {
+      "main": [
+        [
+          {
+            "node": "Keep Only Status = New",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Report Sheet Read Error",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score and Sort Leads": {
+      "main": [
+        [
+          {
+            "node": "Draft Follow-Up for High Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft Follow-Up for High Leads": {
+      "main": [
+        [
+          {
+            "node": "Build Triage Report",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep Only Status = New": {
+      "main": [
+        [
+          {
+            "node": "Score and Sort Leads",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Triage Report": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "availableInMCP": true
+  },
+  "versionId": "4c856236-6438-4501-9369-1a275c55e035",
+  "meta": {
+    "instanceId": "8a7ce5fe68e27d4d273361afd1c34ea9b2eac037c8e11917e004996754a93241"
+  },
+  "nodeGroups": [],
+  "id": "6ucVXFd3iIPmot3t",
+  "tags": []
+}
